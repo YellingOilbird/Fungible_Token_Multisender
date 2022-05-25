@@ -285,7 +285,7 @@ export default function App() {
         const amount = ConvertToYoctoNear((total - deposit));
         setAmount(amount);
         const MULTISENDER_CONTRACT = "dev-1653474869258-46527314516544";
-        await window.contractFT.ft_transfer_call({
+        await window.contractFT.ft_transfer({
             receiver_id : MULTISENDER_CONTRACT,
             amount: amount,
             msg: "deposit to multisender"
