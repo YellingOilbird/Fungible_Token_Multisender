@@ -3,9 +3,8 @@ use std::convert::{TryFrom, TryInto};
 
 #[allow(unused_imports)]
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
-use near_sdk::collections::{LookupMap, UnorderedMap};
-use near_sdk::json_types::U128;
-use near_sdk::{env, ext_contract, near_bindgen, AccountId, Promise, PromiseResult, Gas, Balance, PromiseOrValue};
+use near_sdk::json_types::{U128, ValidAccountId};
+use near_sdk::{env, log, ext_contract, near_bindgen, AccountId, Promise, PromiseResult, Gas, Balance, PromiseOrValue};
 use near_sdk::serde::{Deserialize, Serialize};
 
 #[allow(dead_code)]
@@ -30,7 +29,7 @@ pub trait FungibleToken {
 #[ext_contract(ext_self)]
 pub trait MyContract {
     fn on_ft_balance_of(&self, account_id: AccountId) -> String;
-    //fn on_ft_transfer_deposit(&mut self, account_id: AccountId, amount: U128);
+    fn ft_on_transfer(&mut self, sender_id: ValidAccountId, amount: U128, msg: String,) -> PromiseOrValue<U128>;
     fn on_transfer_from_balance(&mut self, account_id: AccountId, amount: Balance, recipient: AccountId);
 }
 
@@ -46,6 +45,23 @@ pub struct Operation {
     account_id: AccountId,
     amount: U128,
 }
+//Transfer calls msg instructions
+pub enum TransferInstruction {
+    Unknown,
+    Default,
+    Deposit,
+}
+
+//Configure transfer callback actions via msg
+impl From<String> for TransferInstruction {
+    fn from(item: String) -> Self {
+        match &item[..] {
+            "deposit" => TransferInstruction::Deposit,
+            ""        => TransferInstruction::Default,
+            _         => TransferInstruction::Unknown,
+        }
+    }
+}
 
 
 #[near_bindgen]
@@ -58,7 +74,7 @@ impl MultisenderFt {
         let balance = self.get_user_balance(account_id.clone()).0;
         assert!(
             balance > deposit_amount.0 + GAS_FOR_FT_TRANSFER,
-            "You need {} more yocto_FT for deposit to Multisender", deposit_amount.0 + GAS_FOR_FT_TRANSFER - balance
+            "You need {} more yocto_LNC for deposit to Multisender", deposit_amount.0 + GAS_FOR_FT_TRANSFER - balance
         );
 
         let attached_tokens: u128 = deposit_amount.0; 
@@ -70,6 +86,34 @@ impl MultisenderFt {
         self.get_deposit(account_id)
     }
 
+    pub fn ft_on_transfer(
+        &mut self,
+        //token_id: AccountId,
+        sender_id: ValidAccountId,
+        amount: U128,
+        msg: String,
+    ) -> PromiseOrValue<U128> {
+
+        //token contract which calls this function
+        let token_id = env::predecessor_account_id();
+        let sender: AccountId = sender_id.into();
+
+        match TransferInstruction::from(msg) {
+
+            TransferInstruction::Deposit => {
+                log!("in deposit from @{} with token: {} amount {} ", sender, token_id, amount.0);
+                self.deposit(sender, amount);
+                PromiseOrValue::Value(U128(0))
+            },
+            TransferInstruction::Default => unreachable!(),
+            TransferInstruction::Unknown => {
+                log!("transaction failed - wrong message! 'deposit' - msg for deposit to Multisender");
+                PromiseOrValue::Value(amount)
+            }
+
+        }
+    }
+
     //withdraw all from multisender
     #[payable]
     pub fn withdraw_all(&mut self, account_id: AccountId) {
@@ -79,7 +123,7 @@ impl MultisenderFt {
             deposit > GAS_FOR_FT_TRANSFER,
             "Nothing to withdraw!"
         );
-        self.ft_on_transfer(
+        self.ft_transfer_from(
             account_id.clone(),
             deposit.into()
         );
@@ -150,7 +194,7 @@ impl MultisenderFt {
         //"msg":"hi"
     //}
     //' --accountId oilbird.testnet --amount 1Yocto --gas 300000000000000
-    pub fn ft_on_transfer(
+    pub fn ft_transfer_from(
         &mut self,
         receiver_id: AccountId,
         amount: U128,
@@ -219,9 +263,9 @@ impl MultisenderFt {
             let amount_u128: u128 = account.amount.into();
 
             if direct_logs {
-                env::log_str(format!("Sending {} yFT (~{} FT) to account @{}", amount_u128, yocto_ft(amount_u128), account.account_id).as_str());
+                env::log_str(format!("Sending {} yLNC (~{} LNC) to account @{}", amount_u128, yocto_ft(amount_u128), account.account_id).as_str());
             } else {
-                let log = format!("Sending {} yFT (~{} FT) to account @{}\n", amount_u128, yocto_ft(amount_u128), account.account_id);
+                let log = format!("Sending {} yLNC (~{} LNC) to account @{}\n", amount_u128, yocto_ft(amount_u128), account.account_id);
                 logs.push_str(&log);
             }
 
@@ -229,7 +273,7 @@ impl MultisenderFt {
             self.deposits.insert(account_id.clone(), tokens);
 
             //transfer
-            self.ft_on_transfer(
+            self.ft_transfer_from(
                 account.account_id.clone(),
                 account.amount,
             )
@@ -282,15 +326,15 @@ impl MultisenderFt {
         for account in accounts {
             let amount_u128: u128 = account.amount.into();
 
-            self.ft_on_transfer(
+            self.ft_transfer_from(
                 account.account_id.clone(),
                 account.amount,
             );
 
             if direct_logs {
-                env::log_str(format!("Sending {} yFT to account @{}", amount_u128, account.account_id).as_str());
+                env::log_str(format!("Sending {} yLNC to account @{}", amount_u128, account.account_id).as_str());
             } else {
-                let log = format!("Sending {} yFT to account @{}\n", amount_u128, account.account_id);
+                let log = format!("Sending {} yLNC to account @{}\n", amount_u128, account.account_id);
                 logs.push_str(&log);
             }
         }
@@ -308,7 +352,7 @@ impl MultisenderFt {
 
         let transfer_succeeded = is_promise_success();
         if !transfer_succeeded {
-            env::log_str(format!("Transaction to @{} failed. {} yFT (~{} FT) kept on the app deposit", recipient, amount_sent.0, yocto_ft(amount_sent.0)).as_str());
+            env::log_str(format!("Transaction to @{} failed. {} yLNC (~{} LNC) kept on the app deposit", recipient, amount_sent.0, yocto_ft(amount_sent.0)).as_str());
             let previous_balance: u128 = self.get_deposit(account_id.clone()).into();
             self.deposits.insert(account_id, previous_balance + amount_sent.0);
         }

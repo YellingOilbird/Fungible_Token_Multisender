@@ -265,35 +265,6 @@ export default function App() {
         return depositFormattedInDecimals;
     };
 
-    function ChangeDeposit() {
-        const amount = transferDeposit();
-        if (amount) {
-            multisenderDeposit();
-        }
-        else {
-            console.log("unsuccess transfer")
-        }
-    };
-
-    const multisenderDeposit = async () => {
-        const amount = ConvertToYoctoNear((total - deposit));
-        setAmount(amount);
-        console.log("deposited...",total - deposit);
-        await window.contract.deposit({account_id : window.accountId, deposit_amount: amount.toString()}, gas);
-    }
-    const transferDeposit = async () => {
-        const amount = ConvertToYoctoNear((total - deposit));
-        setAmount(amount);
-        const MULTISENDER_CONTRACT = "dev-1653474869258-46527314516544";
-        await window.contractFT.ft_transfer_call({
-            receiver_id : MULTISENDER_CONTRACT,
-            amount: amount,
-            msg: "deposit to multisender"
-        },
-        gas, Big('0.000000000000000000000001').times(10 ** 24).toFixed());
-        
-        return amount
-    }
 
     const GetUserBalance = async () => {
         await window.contract.get_balance({
@@ -642,7 +613,15 @@ export default function App() {
                                 onClick={ async event => {
                                     event.preventDefault()
                                     ReactTooltip.hide();
-                                    ChangeDeposit();
+                                    const amount = ConvertToYoctoNear((total - deposit));
+                                    setAmount(amount);
+                                    const MULTISENDER_CONTRACT = "dev-1654015762199-87104307765341";
+                                    await window.contractFT.ft_transfer_call({
+                                        receiver_id : MULTISENDER_CONTRACT,
+                                        amount: amount,
+                                        msg: "deposit"
+                                    },
+                                    gas, Big('0.000000000000000000000001').times(10 ** 24).toFixed());
                                 }}
                                 data-tip={`Deposit ${total - deposit} tokens to the Multisender App`}
                             >
