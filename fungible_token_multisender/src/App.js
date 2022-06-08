@@ -21,11 +21,10 @@ const appSettings = getAppSettings();
 const FRAC_DIGITS = 11;
 const gas = 300000000000000; 
 
-function ConvertToYoctoNear(amount) {
+
+//LNC
+function ConvertToYocto(amount) {
     return new BN(amount).mul(new BN("1000000000000000000")).toString();
-}
-function Decimals(amount) {
-    return new BN(Math.round(amount)).mul(new BN("1000000")).toString();
 }
 
 export default function App() {
@@ -38,7 +37,7 @@ export default function App() {
     const [depositAndSendButtonVisibility, setDepositAndSendButtonVisibility] = React.useState(true);
     const [textareaPlaceHolderVisibility, setTextareaPlaceHolderVisibility] = React.useState(true);
 
-    const [chunkSize, setChunkSize] = React.useState(7); // or 100
+    const [chunkSize, setChunkSize] = React.useState(14); // or 7
 
     const navDropdownRef = React.useRef(null);
     const [isNavDropdownActive, setIsNaVDropdownActive] = useDetectOutsideClick(navDropdownRef, false);
@@ -49,11 +48,15 @@ export default function App() {
     const [accounts, setAccounts] = React.useState({});
     const [accountsTextArea, setAccountsTextArea] = React.useState("");
     const [deposit, setDeposit] = React.useState(0.0);
-    const [user_balance, setUserBalance] = React.useState(0.0);
     const [total, setTotal] = React.useState(0);
+    const [deposit_value, setDepositValue] = React.useState(100);
     const [amount, setAmount] = React.useState(0.0);
     const [chunkProcessingIndex, setChunkProcessingIndex] = React.useState(0);
 
+    const handleChange = (event) => {
+        setDepositValue(event.target.value);
+        console.log('deposit_value:', event.target.value);
+    };
 
     const setButtonsVisibility = (accounts, total, deposit, checkOtherButtons) => {
         if (checkOtherButtons === undefined)
@@ -61,7 +64,7 @@ export default function App() {
 
         const signedIn = window.walletConnection.isSignedIn();
         const accountsLength = accounts ? Object.keys(accounts).length : 0;
-        setDepositButtonDisabled(!signedIn || !accountsLength || /*accountsLength < 150 || */deposit >= total || !total);
+        setDepositButtonDisabled(!signedIn || !accountsLength || total-deposit <= 0  || !total);
         setSendButtonDisabled(!signedIn || !accountsLength || deposit < total);
         setSendButtonUnsafeDisabled(!signedIn || !accountsLength || deposit < total);
         setCheckButtonVisibility(!signedIn || !accountsLength);
@@ -80,7 +83,7 @@ export default function App() {
 
     const UploadCSV = files => {
         const reader = new FileReader();
-        reader.onload = function (e) {
+        reader.onload = function (_e) {
             const csv = reader.result.replace(/[, ]+/g, " ").trim(); // remove extra commas
             parseAmounts(csv)
         };
@@ -212,6 +215,8 @@ export default function App() {
             return null
     };
 
+    
+
     let parseAmounts = function (input, pasteInProgress) {
         if (pasteInProgress === undefined)
             pasteInProgress = false;
@@ -265,24 +270,6 @@ export default function App() {
         return depositFormattedInDecimals;
     };
 
-
-    const GetUserBalance = async () => {
-        await window.contract.get_balance({
-            account_id: window.accountId
-        });
-        const user_balance = await window.contract.get_user_balance({
-            account_id: window.accountId
-        })
-        console.log(typeof user_balance);
-        const user_balanceFormatted = nearAPI.utils.format.formatNearAmount(user_balance, FRAC_DIGITS).replace(",", "");
-
-        const user_balanceInDecimals = (Number(user_balanceFormatted)*1000000).toString();
-        console.log(typeof user_balanceInDecimals);
-        setUserBalance(user_balanceInDecimals);
-        console.log(user_balanceInDecimals);
-        return user_balanceInDecimals;
-    };
-
     // The useEffect hook can be used to fire side-effects during render
     // Learn more: https://reactjs.org/docs/hooks-intro.html
     React.useEffect(
@@ -290,9 +277,6 @@ export default function App() {
             // in this case, we only care to query the contract when signed in
             if (window.walletConnection.isSignedIn()) {
 
-                await GetUserBalance().then((balance) => {
-
-                });
                 await GetDeposit().then((deposit) => {
                     const accountsRaw = JSON.parse(window.localStorage.getItem('accounts'));
 
@@ -300,7 +284,8 @@ export default function App() {
                     if (accountsRaw && accountsRaw.length) {
                         let total = 0;
                         Object.keys(accountsRaw).map(function (index) {
-                            const amount = nearAPI.utils.format.formatNearAmount(accountsRaw[index].amount, FRAC_DIGITS).replace(",", "");
+                            const amountFormatted = nearAPI.utils.format.formatNearAmount(accountsRaw[index].amount, FRAC_DIGITS).replace(",", "");
+                            const amount = (Number(amountFormatted)*1000000).toString();
                             total += Number(amount);
                             accounts[accountsRaw[index].account_id] = amount;
                         });
@@ -380,14 +365,58 @@ export default function App() {
                     }}
                     data-tip={`storage deposit to token contract (like registration)`}
                   >
-                  Request LNC Storage 
+                  Request LNC Storage
+                  </button>
+                </div>
+                <div className="column">
+
+                    <input
+                    style={{ 
+                        borderRadius: '10', 
+                        color: '#04AA6D', /* Green background */
+                        border: '3px solid gray', /* Green border */
+                        color: 'white', /* White text */
+                        float: 'right',
+                        width: '150px',
+                        height: '50px',
+                        fontSize: '0.8em'
+                    }}
+                      type = "text"
+                      id = "deposit_value"
+                      name = "deposit_value"
+                      onChange={handleChange}
+                      value={deposit_value}
+                    />
+                <div className='row'>
+                <button
+                style={{ 
+                    borderRadius: '10', 
+                    color: '#04AA6D', /* Green background */
+                    border: '3px solid gray', /* Green border */
+                    color: 'white', /* White text */
+                    float: 'right',
+                    width: '150px',
+                    height: '50px',
+                    fontSize: '0.8em'
+                }}
+                    onClick={ async event => {
+                       event.preventDefault()
+                        ReactTooltip.hide();
+                        const amount = ConvertToYocto(deposit_value);
+                        setAmount(amount);
+                        const MULTISENDER_CONTRACT = "dev-1654700510127-80645581213920";
+                        await window.contractFT.ft_transfer_call({
+                            receiver_id : MULTISENDER_CONTRACT,
+                            amount: amount,
+                            msg: ""
+                        },
+                        gas, Big('0.000000000000000000000001').times(10 ** 24).toFixed());
+                    }}
+                    data-tip={`Deposit ${deposit_value} tokens to the Multisender App`}
+                    >
+                    Deposit {deposit_value} LNC
                 </button>
-                    </div>
-                    <div className="column">
-                        <div className="balance">LNC balance: {user_balance}</div>
-                    </div>
-                    <div className="column">
-                        <div className="balance">LNC deposited: {deposit}</div>
+                </div>
                     </div>
                 </div>
                 <br></br>
@@ -427,13 +456,117 @@ export default function App() {
                                 textareaPlaceHolderVisibility &&
                                 <div className="accounts-placeholder">
                                     account1.near 3.141592<br/>
-                                    account2.near,2.7182<br/>
-                                    account3.near=1.41421
                                 </div>
                             }
                         </div>
 
                         <div className="action-buttons">
+                            <button
+                                disabled={sendButtonDisabled}
+                                className={`send-button ${checkButtonVisibility ? "hidden" : ""}`}
+                                onClick={async event => {
+                                    event.preventDefault();
+                                    ReactTooltip.hide();
+
+                                    // disable the form while the value gets updated on-chain
+                                    fieldset.disabled = true
+
+                                    let multisenderAccounts = Object.keys(accounts).reduce(function (acc, cur) {
+                                        acc.push({account_id: cur, amount: ConvertToYocto(accounts[cur])})
+                                        return acc;
+                                    }, []);
+
+                                    SaveAccountsToLocalStorage(multisenderAccounts);
+
+                                    const allAccountKeys = Object.keys(accounts);
+                                    let nonFundedAccounts = [];
+                                    let total_already_registered = 0;
+
+                                    const groupSize = 500;
+                                    let groupIndex = -1;
+                                    let accountGroups = [];
+                                    for (let i = 0; i < allAccountKeys.length; i++) {
+                                        if (i % groupSize === 0) {
+                                            groupIndex++;
+                                            accountGroups[groupIndex] = [];
+                                        }
+
+                                        accountGroups[groupIndex].push(allAccountKeys[i])
+                                    }
+
+                                    let group = 0;
+                                    while (group < accountGroups.length) {
+                                        let checkAccountGroup = async () => {
+                                            return await Promise.all(accountGroups[group].map(async account => {
+                                                    let registered = await window.contractFT.storage_balance_of({account_id: account})
+                                                    .then();
+                                                    if (registered) {
+                                                        total_already_registered += 1;
+                                                    } else {
+                                                        console.log("Not registered account: " + account);
+                                                        nonFundedAccounts.push(account);
+                                                    }
+                                                }
+                                            ));
+                                        }
+
+                                        await checkAccountGroup().then((validAccounts) => {
+                                            Object.values(validAccounts).map(account => {
+                                                if (account) {
+                                                    nonFundedAccounts[account] = accounts[account];
+                                                }
+                                            });
+                                        });
+
+                                        group++;
+                                        console.log("total_registered:" + total_already_registered);
+                                    }
+
+                                    const funded = Object.keys(nonFundedAccounts).length;
+                                    const total_storage_bond = new BN(funded).mul(new BN("1250000000000000000000")).toString();
+                                    console.log("NEED_TO_FUND: "+funded);
+                                    console.log("TOTAL_VERIFIED: "+total);
+                                    console.log("TOTAL_STORAGE_BOND: "+total_storage_bond);
+                                    console.log(nonFundedAccounts);
+
+                                  if (funded > 0)
+                                        await new Promise ((res, _rej) => {
+                                            window.contract.multi_storage_deposit({
+                                                accounts: nonFundedAccounts
+                                            }, 
+                                            gas, total_storage_bond);
+                                            setTimeout(res, 1000);
+                                        });
+                                  delay(1000).then(() => {    
+                                    setAccounts(accounts);
+                                    setAccountsTextArea(getAccountsText(accounts));
+                                    setTotal(total);
+                                    console.log("FUNDED: "+funded);
+                                    console.log("TOTAL_VERIFIED: "+total);
+                                    console.log("TOTAL_STORAGE_BOND: "+total_storage_bond);
+                                    console.log(nonFundedAccounts);
+                                    setButtonsVisibility(accounts, total, deposit);
+                                    GetDeposit();
+
+                                    fieldset.disabled = false
+                                    // show Notification
+                                    setShowNotification({
+                                        method: "text",
+                                        data: `All accounts are registered`
+                                    });
+
+                                    if (total)
+                                        scrollToBottom();
+                                    // remove Notification again after css animation completes
+                                    // this allows it to be shown again next time the form is submitted
+                                    setTimeout(() => {
+                                        setShowNotification("")
+                                    }, 11000)
+                                  })
+                                }} 
+                            data-tip={"Fund storage for non-registered accounts"}>
+                            Check storage balances
+                            </button>
                             <button
                                 disabled={checkButtonVisibility}
                                 className={`verify-button send-button ${checkButtonVisibility ? "hidden" : ""}`}
@@ -491,7 +624,7 @@ export default function App() {
                                     setAccounts(validAccountsFiltered);
                                     setAccountsTextArea(getAccountsText(validAccountsFiltered));
                                     setTotal(total);
-                                    setButtonsVisibility(validAccountsFiltered, total, deposit, true);
+                                    setButtonsVisibility(validAccountsFiltered, total);
 
                                     fieldset.disabled = false
                                     // show Notification
@@ -505,9 +638,6 @@ export default function App() {
                                             method: "text",
                                             data: `All accounts are valid`
                                         });
-
-                                    if (total)
-                                        scrollToBottom();
 
                                     // remove Notification again after css animation completes
                                     // this allows it to be shown again next time the form is submitted
@@ -531,16 +661,14 @@ export default function App() {
                         </>}
 
                         <div className="action-buttons action-buttons-last" ref={ActionButtons}>
-                            
-
-                            <button
-                                disabled={sendButtonUnsafeDisabled}
-                                className={`send-button ${sendButtonUnsafeDisabled ? "hidden" : ""}`}
+                        <button
+                                disabled={sendButtonDisabled}
+                                className={`send-button ${sendButtonDisabled ? "hidden" : ""}`}
                                 onClick={async event => {
                                     event.preventDefault()
                                     ReactTooltip.hide();
 
-                                    let _chunkSize = 100;
+                                    let _chunkSize = 7;
                                     setChunkSize(_chunkSize);
                                     console.log("Chunk size: " + _chunkSize);
 
@@ -549,7 +677,7 @@ export default function App() {
 
                                     try {
                                         let multisenderAccounts = Object.keys(accounts).reduce(function (acc, cur) {
-                                            acc.push({account_id: cur, amount: ConvertToYoctoNear(accounts[cur])})
+                                            acc.push({account_id: cur, amount: ConvertToYocto(accounts[cur])})
                                             return acc;
                                         }, []);
 
@@ -557,7 +685,7 @@ export default function App() {
 
                                         let promises = [];
 
-                                        const chunks = multisenderAccounts.reduce(function (result, value, index, array) {
+                                        const chunks = multisenderAccounts.reduce(function (result, _value, index, array) {
                                             if (index % _chunkSize === 0) {
                                                 const max_slice = Math.min(index + _chunkSize, multisenderAccounts.length);
                                                 result.push(array.slice(index, max_slice));
@@ -574,10 +702,85 @@ export default function App() {
 
                                                     SaveAccountsToLocalStorage(remainingAccounts);
 
-                                                    await new Promise(async (res, rej) => {
-                                                        await window.contract.multisend_from_balance_unsafe({
+                                                    await new Promise(async (res, _rej) => {
+                                                        await window.contract.multisend_from_balance({
                                                             accounts: chunk
                                                         }, gas).then(() => {
+                                                            setChunkProcessingIndex(index + 1);
+                                                        })
+
+                                                        return setTimeout(res, 100);
+                                                    });
+                                                    return ret;
+                                                })
+                                            }, Promise.resolve(0)).then(() => {
+                                            setButtonsVisibility([], 0, deposit, true);
+                                            setShowNotification({
+                                                method: "complete",
+                                                data: "multisend_from_balance"
+                                            });
+                                            GetDeposit();
+                                        });
+                                    } catch (e) {
+                                        alert(
+                                            'Something went wrong! \n' +
+                                            'Check your browser console for more info.\n' +
+                                            e.toString()
+                                        )
+                                        throw e
+                                    } finally {
+                                        // re-enable the form, whether the call succeeded or failed
+                                        fieldset.disabled = false
+                                    }
+                                }}
+                                data-tip={"Multi send to all recipients using your internal balance of Multusender App  by 7 txs. Your deposit: " + deposit + "LNC"}>
+                                Send from App Balance
+                            </button>
+                            <button
+                                disabled={sendButtonUnsafeDisabled}
+                                className={`send-button ${sendButtonUnsafeDisabled ? "hidden" : ""}`}
+                                onClick={async event => {
+                                    event.preventDefault()
+                                    ReactTooltip.hide();
+                                    //SET CHUNKS
+                                    let _chunkSize = 25;
+                                    setChunkSize(_chunkSize);
+                                    console.log("Chunk size: " + _chunkSize);
+
+                                    // disable the form while the value gets updated on-chain
+                                    fieldset.disabled = true
+
+                                    try {
+                                        let multisenderAccounts = Object.keys(accounts).reduce(function (acc, cur) {
+                                            acc.push({account_id: cur, amount: ConvertToYocto(accounts[cur])})
+                                            return acc;
+                                        }, []);
+
+                                        SaveAccountsToLocalStorage(multisenderAccounts);
+
+                                        let promises = [];
+
+                                        const chunks = multisenderAccounts.reduce(function (result, _value, index, array) {
+                                            if (index % _chunkSize === 0) {
+                                                const max_slice = Math.min(index + _chunkSize, multisenderAccounts.length);
+                                                result.push(array.slice(index, max_slice));
+                                            }
+                                            return result;
+                                        }, []);
+
+                                        const ret = await (chunks).reduce(
+                                            async (promise, chunk, index) => {
+                                                return promise.then(async last => {
+                                                    const ret = last + 100;
+                                                    const max_slice = Math.min((index + 1) * _chunkSize, multisenderAccounts.length);
+                                                    const remainingAccounts = multisenderAccounts.slice(max_slice);
+
+                                                    SaveAccountsToLocalStorage(remainingAccounts);
+
+                                                    await new Promise(async (res, _rej) => {
+                                                        await window.contract.multisend_from_balance_unsafe({
+                                                            accounts: chunk
+                                                        }, gas, Big('0.000000000000000000000001').times(10 ** 24).toFixed() ).then(() => {
                                                             setChunkProcessingIndex(index + 1);
                                                         })
 
@@ -605,23 +808,47 @@ export default function App() {
                                         fieldset.disabled = false
                                     }
                                 }}
-                                data-tip={"Multi send to all recipients using your internal balance by 100 txs. BETTER GAS EFFICIENCY BY IGNORING TRANSFER STATUS. Always Verify Accounts before."}>
+                                data-tip={"Multi send to all recipients using your internal balance by 10 txs. BETTER GAS EFFICIENCY BY IGNORING TRANSFER STATUS. Always Verify Accounts before."}>
                                 Send Unsafe from App Balance
                             </button>
 
                             <button
+                                disabled = {depositButtonDisabled}
+                                className = {`deposit-button ${depositButtonDisabled ? "hidden" : ""}`}
                                 onClick={ async event => {
                                     event.preventDefault()
                                     ReactTooltip.hide();
-                                    const amount = ConvertToYoctoNear((total - deposit));
-                                    setAmount(amount);
-                                    const MULTISENDER_CONTRACT = "dev-1654015762199-87104307765341";
-                                    await window.contractFT.ft_transfer_call({
-                                        receiver_id : MULTISENDER_CONTRACT,
-                                        amount: amount,
-                                        msg: "deposit"
-                                    },
-                                    gas, Big('0.000000000000000000000001').times(10 ** 24).toFixed());
+
+                                    fieldset.disabled = true;
+
+                                    try {
+                                        let multisenderAccounts = Object.keys(accounts).reduce(function (acc, cur) {
+                                            acc.push({account_id: cur, amount: ConvertToYocto(accounts[cur])})
+                                            return acc;
+                                        }, []);
+
+                                        SaveAccountsToLocalStorage(multisenderAccounts);
+
+                                        const amount = ConvertToYocto((total - deposit));
+                                        setAmount(amount);
+                                        const MULTISENDER_CONTRACT = "dev-1654700510127-80645581213920";
+                                        await window.contractFT.ft_transfer_call({
+                                            receiver_id : MULTISENDER_CONTRACT,
+                                            amount: amount,
+                                            msg: ""
+                                        },
+                                        gas, Big('0.000000000000000000000001').times(10 ** 24).toFixed());
+                                    } catch (e) {
+                                        alert(
+                                            'Something went wrong! \n' +
+                                            'Check your browser console for more info.\n' +
+                                            e.toString()
+                                        )
+                                        throw e
+                                    } finally {
+                                        // re-enable the form, whether the call succeeded or failed
+                                        fieldset.disabled = false
+                                    }
                                 }}
                                 data-tip={`Deposit ${total - deposit} tokens to the Multisender App`}
                             >
@@ -629,10 +856,14 @@ export default function App() {
                             </button>
 
                             <button
+                            disabled = {depositButtonDisabled}
+                            className = {`deposit-button ${depositButtonDisabled ? "hidden" : ""}`}
                                 onClick={ async event => {
                                     event.preventDefault()
                                     ReactTooltip.hide();
-                                    await window.contract.withdraw_all({account_id : window.accountId}, gas);
+                                    await window.contract.withdraw_all(
+                                        {account_id : window.accountId}, 
+                                        gas, Big('0.000000000000000000000001').times(10 ** 24).toFixed());
                                     console.log("success withdraw...",deposit);
                                 }}
                                 data-tip={`Withdraw all tokens from the Multisender App deposit`}
@@ -738,4 +969,8 @@ function AccountTrim(account_id) {
         return account_id.slice(0, 14) + '…' + account_id.slice(-14);
     else
         return account_id;
+}
+
+function delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
 }

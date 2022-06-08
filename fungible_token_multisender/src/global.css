@@ -163,6 +163,8 @@ input {
   border-radius: 5px 0 0 5px;
   color: inherit;
   padding: 0.25em 1em;
+  width: 150px;
+  height: 50px;
 }
 
 input::selection {
@@ -275,7 +277,7 @@ aside footer *:last-child {
 }
 
 .column {
-  float: left;
+  float: right;
   width: 33.33%;
   text-align: right;
 }

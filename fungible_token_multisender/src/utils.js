@@ -22,18 +22,15 @@ export async function initContract() {
         // Change methods can modify the state. But you don't receive the returned value when called.
         changeMethods: [
             'get_deposit',
-            'get_user_balance',
-            'get_balance',
-            'deposit',
             'withdraw_all',
             'multisend_from_balance',
             'multisend_from_balance_unsafe',
-            'ft_on_transfer'
+            'multi_storage_deposit'
         ],
     })
 
     window.contractFT = await new Contract(window.walletConnection.account(), nearConfig.ftContractName, {
-      viewMethods: [],
+      viewMethods: ['storage_balance_of'],
       changeMethods: ['ft_transfer', 'ft_transfer_call', 'storage_deposit']  // deposit, storage
     })
 }

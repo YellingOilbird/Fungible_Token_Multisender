@@ -1,4 +1,4 @@
-const CONTRACT_NAME = process.env.CONTRACT_NAME || 'dev-1654015762199-87104307765341'
+const CONTRACT_NAME = process.env.CONTRACT_NAME || 'dev-1654700510127-80645581213920'
 const FT_CONTRACT = process.env.FT_CONTRACT_NAME || 'lnc.factory.tokenhub.testnet'
 function getConfig(env) {
   switch (env) {
