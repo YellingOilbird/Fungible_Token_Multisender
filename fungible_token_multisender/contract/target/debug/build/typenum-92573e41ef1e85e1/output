@@ -1,2 +1,0 @@
-cargo:rustc-env=TYPENUM_BUILD_CONSTS=/Users/macbookpro/Documents/mmmm/multisender_ft/fungible_token_multisender/contract/target/debug/build/typenum-92573e41ef1e85e1/out/consts.rs
-cargo:rustc-env=TYPENUM_BUILD_OP=/Users/macbookpro/Documents/mmmm/multisender_ft/fungible_token_multisender/contract/target/debug/build/typenum-92573e41ef1e85e1/out/op.rs
