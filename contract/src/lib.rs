@@ -1,46 +1,39 @@
-use std::collections::HashMap;
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryFrom;
 
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
+use near_sdk::collections::{LookupMap, UnorderedMap, UnorderedSet};
 use near_sdk::json_types::U128;
-use near_sdk::{assert_one_yocto, env, log, ext_contract, near_bindgen, AccountId, PromiseResult, Gas, Balance, PromiseOrValue};
+use near_sdk::{assert_one_yocto, env, log, ext_contract, near_bindgen, PanicOnDefault, require};
+use near_sdk::{AccountId, BorshStorageKey, PromiseResult, Promise, Gas, Balance, PromiseOrValue};
 use near_sdk::serde::{Deserialize, Serialize};
 
-/// Token contract for multisend. Cross-calls allows only for this contract
-const TOKEN_CONTRACT:&str = "lnc.factory.tokenhub.testnet";
-/// Token metadata decimals for human-readable convert balances
-const TOKEN_DECIMALS:u8 = 18;
-const TOKEN_TICKER:&str = "LNC";
+use user::UserVStats;
 
-/// Gas constants
-pub const CALLBACK_GAS: Gas = Gas(5_000_000_000_000);
-pub const GAS_FOR_FT_TRANSFER: Gas = Gas(10_000_000_000_000);
-pub const NO_DEPOSIT: u128 = 0;
-pub const STORAGE_PRICE_PER_BYTE: u128 = 10_000_000_000_000_000_000;
+use crate::utils::*;
+use crate::ft_standards::*;
 
-/// Define the methods we'll use on the other contract
-#[ext_contract(ext_ft)]
-pub trait FungibleToken {
-    fn storage_deposit(&self, account_id: AccountId);
-    fn ft_transfer(&mut self, receiver_id: String, amount: String);
-    fn ft_transfer_call(&mut self, receiver_id: String, amount: String, msg: String);
-}
+mod owner;
+mod utils;
+mod views;
+mod ft_standards;
+mod user;
 
-/// Define methods we'll use as callbacks on our contract
-#[ext_contract(ext_self)]
-pub trait MyContract {
-    fn ft_on_transfer(&mut self, sender_id: AccountId, amount: U128, msg: String,) -> PromiseOrValue<U128>;
-    fn on_transfer_from_balance(&mut self, account_id: AccountId, amount_sent: U128, recipient: AccountId);
-}
-
-/*
-You can use LookupMap from near_sdk::collections, 
-but in that case you need to implement Default trait with key prefixes
- */
 #[near_bindgen]
-#[derive(Default, BorshDeserialize, BorshSerialize)]
+#[derive(PanicOnDefault, BorshDeserialize, BorshSerialize)]
 pub struct MultisenderFt {
-    deposits: HashMap<AccountId, u128>,
+    owner_id: AccountId,
+    deposits: LookupMap<AccountId, LookupMap<TokenContract, Balance>>,
+    tokens: UnorderedSet<AccountId>,
+    user_stats: UnorderedMap<AccountId, UserVStats>
+}
+
+//StorageKey implementation for Default prefixes in Multisender contract
+#[derive(BorshSerialize, BorshStorageKey)]
+pub (crate) enum StorageKey {
+    WhitelistedTokens,
+    UserDeposits,
+    UserTotalDeposits,
+    UserStats
 }
 
 /// (account, amount) chunk from front-end input text field for multisend
@@ -53,17 +46,48 @@ pub struct Operation {
 
 /// Internal section
 impl MultisenderFt {
+    pub fn get_user_deposits(&self, account_id: &AccountId) -> LookupMap<TokenContract, Balance> {
+        match self.deposits.get(account_id) {
+            Some(deposits) => {
+                deposits
+            },
+            _ => LookupMap::new(b"d".to_vec()),
+        }    
+    }
     //deposit to multisender
-    pub fn deposit(&mut self, account_id: AccountId, deposit_amount: U128) -> U128 {
-        let attached_tokens: u128 = deposit_amount.0; 
-        let previous_balance: u128 = self.get_deposit(account_id.clone()).into();
-
-        // update info about user deposit in MULTISENDER
-        self.deposits.insert(account_id.clone(), previous_balance + attached_tokens);
-        self.get_deposit(account_id)
+    pub fn deposit(
+        &mut self, 
+        account_id: AccountId, 
+        token_id: TokenContract,
+        deposit_amount: U128
+    ) {
+        let token_whitelisted = self.is_token_whitelisted(&token_id);
+        if token_whitelisted {
+            let attached_tokens: u128 = deposit_amount.0;
+            let previous_balance: u128 = self.get_user_deposit_by_token(&account_id, &token_id).0;
+            match self.deposits.get(&account_id) {
+                Some(mut token_deposits) => {
+                    token_deposits.insert(&token_id, &(attached_tokens + previous_balance));
+                    self.deposits.insert(&account_id, &token_deposits);
+                },
+                None => {
+                    let mut token_deposits = LookupMap::new(StorageKey::UserDeposits);
+                    token_deposits.insert(&token_id, &attached_tokens);
+                    self.deposits.insert(&account_id, &token_deposits);
+                }
+            }
+            log!(
+                "success deposited {:?} of {} from @{}",
+                deposit_amount,
+                token_id,
+                account_id
+            );
+        } else {
+            panic!("{}",ERR_TOKEN_NOT_WHITELISTED)
+        }
     }
 
-    //multisender transfer callback
+    /*
     pub fn on_transfer_from_balance(&mut self, account_id: AccountId, amount_sent: U128, recipient: AccountId) {
         assert_self();
         let transfer_succeeded = is_promise_success();
@@ -77,80 +101,91 @@ impl MultisenderFt {
                 TOKEN_TICKER.to_string(),
             );
             let previous_balance: u128 = self.get_deposit(account_id.clone()).into();
-            self.deposits.insert(account_id, previous_balance + amount_sent.0);
+            self.deposits.insert(&account_id,&(previous_balance + amount_sent.0));
         }
-    }    
+    }
+    */    
 }
 
 #[near_bindgen]
 impl MultisenderFt {
+    #[init]
+    pub fn new(owner_id: AccountId) -> Self {
+        require!(!env::state_exists(), "Already initialized");
+        MultisenderFt { 
+            owner_id, 
+            deposits: LookupMap::new(StorageKey::UserDeposits),
+            tokens: UnorderedSet::new(StorageKey::WhitelistedTokens),
+            user_stats: UnorderedMap::new(StorageKey::UserStats)
+        }
+    }
     //register multiple accounts to TOKEN_CONTRACT. Because of gas limit it may be only less then 50 accounts
     #[payable]
-    pub fn multi_storage_deposit(&mut self, accounts: Vec<AccountId>){
+    pub fn multi_storage_deposit(&mut self, token_id: TokenContract, accounts: Vec<AccountId>){
 
         let total_accounts = accounts.len();
-        assert!(total_accounts <= 50, "ERR_TOO_MANY_ACCOUNTS!");
-
-        //deposit requested for storage_deposit for 1 account into FT contract
-        let storage_bond: u128 = 125 * STORAGE_PRICE_PER_BYTE;
-
         //deposit requested for storage_deposit for all accounts into FT contract
-        let total_storage_bond: u128 = storage_bond * total_accounts as u128;
+        let total_storage_bond: u128 = STORAGE_DEPOSIT * total_accounts as u128;
 
+        assert!(total_accounts <= 50, "{}", ERR_TOO_MANY_ACCOUNTS);
         assert!(
             env::attached_deposit() >= total_storage_bond,
-            "ERR_SMALL_DEPOSIT: YOU NEED {} yN MORE FOR THIS FUNCTION_CALL", (total_storage_bond - env::attached_deposit())
+            "{}: YOU NEED {} yN MORE FOR THIS FUNCTION_CALL", ERR_SMALL_DEPOSIT, (total_storage_bond - env::attached_deposit())
         );
 
-        for account in accounts {
+        let token_whitelisted = self.is_token_whitelisted(&token_id);
+        if token_whitelisted {
 
-            ext_ft::storage_deposit(
-                account.clone(),
-                account_from_str(TOKEN_CONTRACT),
-                storage_bond,
-                CALLBACK_GAS
-            );
+            for account in accounts {
 
-            log!("Register storage for account @{}", account);
+                ext_ft::ext(token_id.clone())
+                    .with_attached_deposit(STORAGE_DEPOSIT)
+                    .with_static_gas(CALLBACK_GAS)
+                    .storage_deposit(account.clone());
+    
+                log!("Register storage for account @{}", account);
+            }
+        } else {
+            panic!("{}", ERR_TOKEN_NOT_WHITELISTED)
         }
     }
 
     //withdraw all from multisender
     #[payable]
-    pub fn withdraw_all(&mut self, account_id: AccountId) {
+    pub fn withdraw_all(&mut self, account_id: AccountId, token_id: TokenContract) {
 
         assert_one_yocto();
 
-        assert!(self.deposits.contains_key(&account_id), "ERR_UNKNOWN_USER");
-        let deposit: u128 = self.get_deposit(account_id.clone()).into();
+        assert!(self.deposits.contains_key(&account_id), "{}", ERR_UNKNOWN_USER);
+        let mut deposit: u128 = self.get_user_deposit_by_token(&account_id, &token_id).0;
         assert!(
             deposit > NO_DEPOSIT,
-            "ERR_NOTHING_TO_WITHDRAW"
+            "{}", ERR_NOTHING_TO_WITHDRAW
         );
+        //TODO fix this with least 1 token assert
+        deposit-=100000000000000000;
+        // 100000000000000000
 
-        ext_ft::ft_transfer(
-            account_id.to_string(),
-            deposit.to_string(),
-            account_from_str(TOKEN_CONTRACT),
-            1u128.into(),
-            CALLBACK_GAS
-        );
-        
-        self.deposits.insert(account_id, NO_DEPOSIT);
-    }
-    
-    pub fn get_deposit(&self, account_id: AccountId) -> U128 {
-        match self.deposits.get(&account_id) {
-            Some(deposit) => {
-                U128::from(*deposit)
-            }
-            None => {
-                0.into()
-            }
-        }
+        ext_ft::ext(token_id.clone())
+            .with_attached_deposit(ONE_YOCTO)
+            .with_static_gas(GAS_FOR_FT_TRANSFER)
+            .ft_transfer(
+                account_id.to_string(), 
+                deposit.to_string()
+            ).then(
+                ext_self::ext(env::current_account_id())
+                    .with_attached_deposit(NO_DEPOSIT)
+                    .with_static_gas(CALLBACK_GAS)
+                    .on_withdraw(
+                        account_id.clone(), 
+                        token_id, 
+                        deposit.into(), 
+                        account_id
+                    )
+            );
     }
 
-    //multisender transfer from deposit
+    /*
     #[payable]
     pub fn multisend_from_balance(&mut self, accounts: Vec<Operation>) {
         assert_one_yocto();
@@ -159,7 +194,7 @@ impl MultisenderFt {
 
         assert!(self.deposits.contains_key(&account_id), "Unknown user");
 
-        let mut tokens: Balance = *self.deposits.get(&account_id).unwrap();
+        let mut tokens: Balance = self.deposits.get(&account_id).unwrap();
         let mut total: Balance = 0;
 
         for account in &accounts {
@@ -188,7 +223,7 @@ impl MultisenderFt {
             );
 
             tokens -= amount_u128;
-            self.deposits.insert(account_id.clone(), tokens);
+            self.deposits.insert(&account_id, &tokens);
 
             //transfer
             ext_ft::ft_transfer(
@@ -221,7 +256,7 @@ impl MultisenderFt {
 
         assert!(self.deposits.contains_key(&account_id), "Unknown user");
 
-        let tokens: Balance = *self.deposits.get(&account_id).unwrap();
+        let tokens: Balance = self.deposits.get(&account_id).unwrap();
         let mut total: Balance = 0;
 
         for account in &accounts {
@@ -255,60 +290,9 @@ impl MultisenderFt {
             );
         }
 
-        self.deposits.insert(account_id, tokens - total);
+        self.deposits.insert(&account_id,&(tokens - total));
 
         log!("Chunk Done!"); 
     }
-    // Function which calls when someone transfer tokens to multisender account. Return transfer if msg is not empty
-    pub fn ft_on_transfer(
-        &mut self,
-        //token_id: AccountId,
-        sender_id: AccountId,
-        amount: U128,
-        msg: String,
-    ) -> PromiseOrValue<U128> {
-
-        //token contract which calls this function
-        let token_id = env::predecessor_account_id();
-        assert_eq!(
-            token_id.clone(), 
-            account_from_str(TOKEN_CONTRACT),
-            "ERR_NOT_ALLOWED"
-        );
-        let sender: AccountId = sender_id.into();
-
-        if msg.is_empty() {
-            self.deposit(sender, amount);
-            PromiseOrValue::Value(U128(0))
-        } else {
-            log!("ERR_WRONG_MSG");
-            PromiseOrValue::Value(amount)
-        }
-
-    }
-
-}
-
-pub fn assert_self() {
-    assert_eq!(env::predecessor_account_id(), env::current_account_id());
-}
-
-fn is_promise_success() -> bool {
-    assert_eq!(
-        env::promise_results_count(),
-        1,
-        "Contract expected a result on the callback"
-    );
-    match env::promise_result(0) {
-        PromiseResult::Successful(_) => true,
-        _ => false,
-    }
-}
-
-pub fn yocto_ft(yocto_amount: Balance) -> Balance {
-    yocto_amount / 10u128.pow(TOKEN_DECIMALS.into())
-}
-
-pub fn account_from_str(str: &str) -> AccountId {
-    AccountId::try_from(str.to_string()).unwrap()
+    */
 }
