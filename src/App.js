@@ -71,7 +71,7 @@ export default function App() {
         const signedIn = window.walletConnection.isSignedIn();
         const accountsLength = accounts ? Object.keys(accounts).length : 0;
         setSignOutButtonDisabled(!signedIn);
-        setCheckStorageDisabled(!signedIn || !accountsLength || !total || !verified);
+        setCheckStorageDisabled(!signedIn || !accountsLength || !verified);
         setDepositButtonDisabled(!signedIn || !accountsLength || !total || deposit-total>=0);
         setWithdrawButtonDisabled(!signedIn || !accountsLength || deposit==0 || !deposit);
         setSendButtonDisabled(!signedIn || !accountsLength || deposit-total<0 || total==0);
@@ -233,7 +233,9 @@ export default function App() {
         if (!pasteInProgress) {
             setAccountsTextArea(input);
         }
-        setButtonsVisibility(accounts, total, deposit, true);
+        if (verified == true) {
+            setButtonsVisibility(accounts, total, deposit, true);
+        } 
     };
 
     const ActionButtons = useRef(null)
@@ -282,8 +284,10 @@ export default function App() {
                         setTextareaPlaceHolderVisibility(false);
                         setAccounts(accounts);
                         setAccountsTextArea(getAccountsText(accounts));
-                        setTotal(total);
-                        setButtonsVisibility(accounts, total, deposit, true);
+                        if (verified == true) {
+                            setTotal(total);
+                            setButtonsVisibility(accounts, total, deposit, true);
+                        }
                     }
                 });
             }
@@ -529,6 +533,10 @@ export default function App() {
                                             gas, total_storage_bond);
                                             setTimeout(res, 1000);
                                             setVerified(true);
+                                            setShowNotification({
+                                                method: "text",
+                                                data: `Registered ${funded} account(s)`
+                                            });
                                         });
                                   };
                                   delay(1000).then(() => {    
