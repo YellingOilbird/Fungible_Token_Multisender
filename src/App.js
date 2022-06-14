@@ -37,7 +37,9 @@ export default function App() {
     const [checkButtonVisibility, setCheckButtonVisibility] = React.useState(false);
     const [depositButtonDisabled, setDepositButtonDisabled] = React.useState(true);
     const [withdrawButtonDisabled, setWithdrawButtonDisabled] = React.useState(true);
-    const [signOutButtonDisabled, setSignOutDisabled] = React.useState(true);
+    const [signOutButtonDisabled, setSignOutButtonDisabled] = React.useState(true);
+    const [checkStorageButtonDisabled, setCheckStorageDisabled] = React.useState(true);
+
     const [textareaPlaceHolderVisibility, setTextareaPlaceHolderVisibility] = React.useState(true);
 
     const [chunkSize, setChunkSize] = React.useState(14); // or 7
@@ -55,6 +57,7 @@ export default function App() {
     const [deposit_value, setDepositValue] = React.useState(100);
     const [amount, setAmount] = React.useState(0.0);
     const [chunkProcessingIndex, setChunkProcessingIndex] = React.useState(0);
+    const [verified, setVerified] = React.useState(false);
 
     const handleChange = (event) => {
         setDepositValue(event.target.value);
@@ -67,9 +70,10 @@ export default function App() {
 
         const signedIn = window.walletConnection.isSignedIn();
         const accountsLength = accounts ? Object.keys(accounts).length : 0;
-        setSignOutDisabled(!signedIn);
-        setDepositButtonDisabled(!signedIn || !accountsLength || total-deposit <= 0  || !total);
-        setWithdrawButtonDisabled(!signedIn || !accountsLength || deposit == 0);
+        setSignOutButtonDisabled(!signedIn);
+        setCheckStorageDisabled(!signedIn || !accountsLength || !total || !verified);
+        setDepositButtonDisabled(!signedIn || !accountsLength || !total || deposit-total>=0 || !verified);
+        setWithdrawButtonDisabled(!signedIn || !accountsLength || deposit==0 || !deposit);
         setSendButtonDisabled(!signedIn || !accountsLength || deposit-total<0 || total==0);
         setSendButtonUnsafeDisabled(!signedIn || !accountsLength || deposit-total<0 || total==0);
         setCheckButtonVisibility(!signedIn || !accountsLength);
@@ -112,8 +116,8 @@ export default function App() {
                     <NavMenu/>
                     <div className="account-sign-out">
                         <button 
-                            disabled={checkButtonVisibility}
-                            className={`verify-button send-button ${checkButtonVisibility ? "hidden" : ""}`}
+                            disabled={signOutButtonDisabled}
+                            className={`verify-button send-button ${signOutButtonDisabled ? "hidden" : ""}`}
                             style={{float: 'right'}} onClick={logout}>
                                 Sign out
                         </button>
@@ -248,7 +252,11 @@ export default function App() {
         const depositFormattedInDecimals = (Number(depositFormatted)*1000000).toString();
         setDeposit(depositFormattedInDecimals);
         console.log(depositFormattedInDecimals);
-        setWithdrawButtonDisabled(false);
+        if (depositFormattedInDecimals == 0) {
+            setWithdrawButtonDisabled(true);
+        } else {
+            setWithdrawButtonDisabled(false);
+        }
         return depositFormattedInDecimals;
     };
 
@@ -446,8 +454,8 @@ export default function App() {
 
                         <div className="action-buttons">
                             <button
-                                disabled={withdrawButtonDisabled}
-                                className={`send-button ${checkButtonVisibility ? "hidden" : ""}`}
+                                disabled={checkStorageButtonDisabled}
+                                className={`send-button ${checkStorageButtonDisabled ? "hidden" : ""}`}
                                 onClick={async event => {
                                     event.preventDefault();
                                     ReactTooltip.hide();
@@ -529,6 +537,8 @@ export default function App() {
                                     console.log("TOTAL_VERIFIED: "+total);
                                     console.log("TOTAL_STORAGE_BOND: "+total_storage_bond);
                                     console.log(nonFundedAccounts);
+                                    setVerified(true);
+                                    //setDepositButtonDisabled(false);
                                     setButtonsVisibility(accounts, total, deposit);
                                     GetDeposit();
 
@@ -548,8 +558,8 @@ export default function App() {
                                     }, 11000)
                                   })
                                 }} 
-                            data-tip={"Fund storage for non-registered accounts"}>
-                            Check storage balances
+                            data-tip={"Fund storage for non-registered accounts LIMIT 50 ACCOUNTS"}>
+                            Check storage balances *
                             </button>
                             <button
                                 disabled={checkButtonVisibility}
@@ -608,6 +618,7 @@ export default function App() {
                                     setAccounts(validAccountsFiltered);
                                     setAccountsTextArea(getAccountsText(validAccountsFiltered));
                                     setTotal(total);
+                                    setCheckStorageDisabled(false);
                                     setButtonsVisibility(validAccountsFiltered, 0, deposit);
 
                                     fieldset.disabled = false
@@ -841,7 +852,7 @@ export default function App() {
 
                             <button
                             disabled = {withdrawButtonDisabled}
-                            className = {`deposit-button ${checkButtonVisibility ? "hidden" : ""}`}
+                            className = {`deposit-button ${withdrawButtonDisabled ? "hidden" : ""}`}
                                 onClick={ async event => {
                                     event.preventDefault()
                                     ReactTooltip.hide();
